@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Data (large, rebuilt by the scripts)
+data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS and editor files
+.DS_Store
+.vscode/

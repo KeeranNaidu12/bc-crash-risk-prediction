@@ -1,0 +1,14 @@
+pandas
+numpy
+geopandas
+shapely
+requests
+tableauhyperapi
+psycopg2-binary
+sqlalchemy
+python-dotenv
+scikit-learn
+lightgbm
+shap
+matplotlib
+jupyter
