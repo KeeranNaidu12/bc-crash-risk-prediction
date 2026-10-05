@@ -5,7 +5,9 @@
 data/
 
 # Python
-.venv/
+.venv
+.venv.nosync/
+.venv-old-icloud/
 __pycache__/
 *.pyc
 
