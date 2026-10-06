@@ -1,0 +1,13 @@
+year,split,method,mae,poisson_deviance,top100_share,in_90_range
+2023,validation,Same as last year,2.1977,2.955,0.3275,
+2023,validation,Average of prior years,1.9409,1.5924,0.3283,
+2023,validation,Average x level,1.9338,1.5541,0.3283,
+2023,validation,Empirical Bayes,1.8931,1.456,0.3283,0.9541
+2024,validation,Same as last year,2.0941,2.9657,0.3208,
+2024,validation,Average of prior years,1.8778,1.5992,0.3223,
+2024,validation,Average x level,1.8425,1.5335,0.3223,
+2024,validation,Empirical Bayes,1.8276,1.4881,0.3224,0.9375
+2025,test,Same as last year,1.9526,2.9144,0.3107,
+2025,test,Average of prior years,1.6803,1.4163,0.3114,
+2025,test,Average x level,1.6856,1.3808,0.3114,
+2025,test,Empirical Bayes,1.681,1.3515,0.3114,0.9509
