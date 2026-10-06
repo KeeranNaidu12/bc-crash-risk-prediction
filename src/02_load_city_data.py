@@ -7,9 +7,10 @@ Usage (from the project root, after 01_load_icbc.py):
     python src/02_load_city_data.py
 
 Creates in PostgreSQL:
-    traffic_signals        one row per City traffic signal
-    intersection_signal    nearest signal distance for each crash intersection
     intersection_features  static features per intersection (see sql/03_features.sql)
+
+The nearest-signal match is computed here in Python and handed to SQL through a
+temporary intersection_signal table, which 03_features.sql drops once used.
 """
 from pathlib import Path
 
@@ -45,10 +46,7 @@ def main():
     engine = get_engine()
 
     signals = load_signals()
-    signals_table = pd.DataFrame({"latitude": signals.geometry.y,
-                                  "longitude": signals.geometry.x})
-    signals_table.to_sql("traffic_signals", engine, if_exists="replace", index_label="signal_id")
-    print(f"Traffic signals: {len(signals_table):,}")
+    print(f"Traffic signals: {len(signals):,}")
 
     # One point per crash intersection
     ints = pd.read_sql("SELECT DISTINCT location, latitude, longitude FROM intersection_year", engine)
