@@ -37,27 +37,43 @@ df["prior_casualty"] = history["casualty_crashes"].shift(1)
 df[["is_interchange", "is_signalized"]] = df[["is_interchange", "is_signalized"]].astype(int)
 df = df.dropna(subset=["prior_crashes"])  # 2021 has no previous year
 
-# 3. Split by time: learn from 2022-2024, test on 2025
-train = df[df["year"] < TEST_YEAR]
-test = df[df["year"] == TEST_YEAR].copy()
+# ICBC only lists intersections that had a crash, so an intersection whose first crash
+# is in year Y would only be in the data because of year Y. Keep a row only if the
+# intersection had a crash in an EARLIER year, i.e. it was known when predicting.
+df["known_before"] = history["crashes"].transform(lambda s: s.shift(1).cumsum()) > 0
+df = df[df["known_before"]]
 
-# 4. Train LightGBM (Poisson objective = predicting counts)
-model = lgb.LGBMRegressor(objective="poisson", n_estimators=400, learning_rate=0.03,
-                          min_child_samples=30, random_state=42, verbose=-1)
-model.fit(train[FEATURES], train["crashes"])
-test["predicted"] = model.predict(test[FEATURES])
+# 3. Split by time, one year at a time: train on every year before Y, predict Y.
+#    2023 and 2024 are validation years (use them to compare features/settings);
+#    2025 is the final test and should only be looked at once changes are settled.
+def train_model(train):
+    """LightGBM with a Poisson objective, since the target is a count."""
+    model = lgb.LGBMRegressor(objective="poisson", n_estimators=400, learning_rate=0.03,
+                              min_child_samples=30, random_state=42, verbose=-1)
+    return model.fit(train[FEATURES], train["crashes"])
 
-# 5. Compare with a simple baseline: "same as last year"
-def top20_hit_rate(actual, predicted):
-    top_actual = set(actual.nlargest(20).index)
-    top_predicted = set(predicted.nlargest(20).index)
-    return len(top_actual & top_predicted) / 20
 
-print(f"Results on {TEST_YEAR}:")
-for name, pred in [("Baseline (last year)", test["prior_crashes"]), ("LightGBM", test["predicted"])]:
-    mae = mean_absolute_error(test["crashes"], pred)
-    hits = top20_hit_rate(test["crashes"], pred)
-    print(f"  {name:22s} MAE = {mae:.2f}   top-20 hit rate = {hits:.0%}")
+def top_k_hits(actual, predicted, k):
+    """How many of the k intersections with the most crashes were also predicted in the top k."""
+    return len(set(actual.nlargest(k).index) & set(predicted.nlargest(k).index))
+
+
+# 4. Compare LightGBM with a simple baseline, "same as last year", in every year
+print(f"{'':10} {'':22} {'MAE':>5} {'top-20':>7} {'top-100':>8}")
+for year in range(df["year"].min() + 1, TEST_YEAR + 1):
+    train = df[df["year"] < year]
+    test = df[df["year"] == year].copy()
+    model = train_model(train)
+    test["predicted"] = model.predict(test[FEATURES])
+
+    label = "TEST" if year == TEST_YEAR else "validation"
+    for name, pred in [("Baseline (last year)", test["prior_crashes"]), ("LightGBM", test["predicted"])]:
+        mae = mean_absolute_error(test["crashes"], pred)
+        top20 = top_k_hits(test["crashes"], pred, 20)
+        top100 = top_k_hits(test["crashes"], pred, 100)
+        print(f"{year} {label:10} {name:22} {mae:5.2f} {top20:4}/20 {top100:4}/100")
+
+# The loop ends on TEST_YEAR, so model and test are the final 2022-2024 model and its 2025 predictions
 
 # 6. Explain the model with SHAP
 shap_values = shap.TreeExplainer(model).shap_values(test[FEATURES])
