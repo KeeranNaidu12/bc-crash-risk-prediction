@@ -45,22 +45,52 @@ ICBC publishes some rows that stand for more than one crash (`total_crashes` > 1
 
 ## Model
 
-LightGBM (Poisson objective) predicts each intersection's crash count for the next year from its crash history (last year, two-year average, last year's casualty crashes), its features, and its coordinates. It is compared with a "same as last year" baseline.
+**Empirical Bayes** (the method in the Highway Safety Manual, used by road agencies to find high-risk sites) predicts each intersection's crashes for the next year. It blends two estimates:
 
-Validation is done one year at a time: the model is trained on every year before Y and predicts Y, as it would be used in practice. 2023 and 2024 are validation years for comparing features and settings. 2025 is the final test year. Splits are always by year, never random, so the model never learns from a year later than the one it predicts.
+1. **Typical crashes** for an intersection like this one, from a negative binomial regression on its features (signalized, interchange, number of streets). In road-safety terms this is a safety performance function.
+2. **The intersection's own history:** its average crashes per year so far.
 
-Preprocessing: history features use only earlier years, booleans are converted to 0/1, and rows are split by year, never randomly. Features are not scaled, because tree models split on thresholds and are unaffected by scale (tested: 2025 MAE 1.887 unscaled vs 1.884 scaled). High-crash intersections are kept, not removed as outliers, since they are what the model is meant to find. The Poisson objective handles the skewed crash counts, so the target is not log-transformed.
+The weight on the typical estimate is `1 / (1 + k × typical × years of history)`, where `k` is the regression's overdispersion. A busy intersection with several years of history is judged mostly on its own record. A quiet one is pulled towards what is typical for its type, which corrects for one-off bad or good years (regression to the mean).
 
-| Year | Trained on | Model | MAE | Top-20 | Top-100 |
+Fitted on all years, typical crashes per year at an unsignalized two-street intersection are 2.0. They are ×7.8 at signalized intersections, ×3.0 at interchanges and ×7.6 where four or more streets meet. These are associations, not effects: signals are installed at busy intersections, so "signalized" mostly stands in for traffic volume.
+
+### Validation
+
+Validation is done one year at a time: the model is fit on every year before Y and predicts Y, as it would be used in practice. 2023 and 2024 are validation years for comparing methods and settings. 2025 is the final test year. Splits are always by year, never random, so the model never learns from a year later than the one it predicts.
+
+| Year | Method | MAE | Poisson deviance | Top-100 share | Actual in 90% range |
 |---|---|---|---|---|---|
-| 2023 (validation) | 2022 | Baseline | **2.20** | 16 | 88 |
-| | | LightGBM | 2.45 | **17** | **89** |
-| 2024 (validation) | 2022–2023 | Baseline | 2.09 | **16** | **88** |
-| | | LightGBM | **2.02** | 14 | 87 |
-| 2025 (test) | 2022–2024 | Baseline | 1.95 | **16** | 85 |
-| | | LightGBM | **1.89** | 15 | **86** |
+| 2023 (validation) | Same as last year | 2.20 | 2.95 | 32.7% | |
+| | Average of prior years | **1.94** | **1.59** | 32.8% | |
+| | Empirical Bayes | 2.00 | 1.62 | 32.8% | 94.5% |
+| 2024 (validation) | Same as last year | 2.09 | 2.97 | 32.1% | |
+| | Average of prior years | **1.88** | 1.60 | 32.2% | |
+| | Empirical Bayes | 1.91 | **1.59** | 32.2% | 92.9% |
+| 2025 (test) | Same as last year | 1.95 | 2.91 | 31.1% | |
+| | Average of prior years | **1.68** | 1.42 | 31.1% | |
+| | Empirical Bayes | 1.71 | 1.42 | 31.1% | 93.7% |
 
-Top-k counts how many of the k intersections with the most crashes that year were also in the predicted top k. LightGBM has a lower MAE than the baseline once it has at least two years of history, and the gap grows with more training years. On ranking the two are within one or two intersections every year, which is too small a difference to call either one better.
+Top-100 share is the share of the year's crashes that happened at the 100 intersections predicted riskiest. About 31–33% of crashes happen at the top 100 intersections, and every method picks nearly the same ones, so the riskiest intersections stay risky year after year.
+
+Empirical Bayes and the multi-year average are effectively tied, and both clearly beat "same as last year". Empirical Bayes gives the typical estimate a median weight of only 0.06–0.08, because without traffic volume the regression cannot tell a quiet side street from a busy arterial with the same features. So it relies mostly on each intersection's own history. Its advantage over a plain average would grow with traffic volume data.
+
+Each Empirical Bayes prediction comes with a 90% range for the year's crash count, from the negative binomial distribution the method implies. In every past year, 93–95% of actual counts fell inside their range, so the ranges are reliable and slightly conservative.
+
+### 2026 forecast and ranking
+
+`dashboard/predictions.csv` is a forecast for 2026, using all five years of history for all 4,442 intersections. For each intersection it gives the predicted crashes, a 90% range, the typical crashes for its type, and the **excess**: predicted minus typical.
+
+Intersections are ranked by excess (`excess_rank`), as in Highway Safety Manual network screening. Ranking by predicted crashes alone (`predicted_rank`, also included) mostly lists the busiest intersections. Ranking by excess asks which intersections have more crashes than is normal for their type, which is where engineering changes are most likely to help. For example, the unsignalized intersections at Knight St & E 62nd Ave and Dunbar St & W 16th Ave are forecast about 27 crashes a year against a typical 2, which places them in the excess top 100 but not the predicted top 100.
+
+Without traffic volume the two rankings are similar at the top: 18 of the top 20 and 93 of the top 100 are the same. The rank correlation over all intersections is 0.44.
+
+### Why not LightGBM
+
+LightGBM (Poisson objective, using last year's crashes, a two-year average, last year's casualty crashes, the intersection features and coordinates) was tried first and replaced. It was worse than the multi-year average in every year: MAE 2.45, 2.02 and 1.89 for 2023–2025, and a bootstrap 95% interval for the gap excluded zero in each year. With five years of history and a few static features, a flexible model fits noise that a simple average smooths out.
+
+### Preprocessing
+
+History features use only earlier years, and booleans are converted to 0/1. High-crash intersections are kept, not removed as outliers, since they are what the model is meant to find. The negative binomial regression models skewed, overdispersed counts directly, so the target is not log-transformed. Intersections with more than four streets are grouped with four, as there are too few to estimate separately, and the one location with a single street name is grouped with two-street intersections.
 
 ## Limitations
 
@@ -72,8 +102,11 @@ Top-k counts how many of the k intersections with the most crashes that year wer
 - **Traffic signals are current, not historical.** The City file lists today's signals, so an intersection that was signalized during 2021–2025 is treated as signalized in every year.
 - **Signal matching is by distance.** An intersection counts as signalized if a signal lies within 30 m of the point ICBC records. Most matches are under 10 m, but about 130 intersections fall between 10 and 50 m, and a large intersection could be misclassified.
 - **`is_interchange` is a keyword rule** on the intersection name (BRIDGE, RAMP, HWY, CONN), not an official road classification.
-- **The model does not beat the baseline at ranking.** It has a lower MAE in 2024 and 2025, but its top-20 and top-100 hit counts are within one or two of "same as last year". With only five years of data there are just three years to validate on.
-- **Model settings were not tuned.** The LightGBM settings were set by hand, not chosen by searching on the validation years.
+- **No traffic volume.** Standard safety performance functions use traffic volume, the strongest predictor of crashes. Without it the regression is weak, and Empirical Bayes performs about the same as a multi-year average.
+- **Feature effects are associations.** For example, signalized intersections have more crashes because signals are placed at busy intersections, not because signals cause crashes.
+- **Excess is measured against a weak benchmark.** Without traffic volume, "typical for its type" cannot account for how busy an intersection is, so a high excess can still partly reflect heavy traffic, not poor design.
+- **No trend over time.** The forecast assumes crash rates stay as they were in 2021–2025 and does not model year-to-year changes in overall crash levels.
+- **Little validation data.** With five years of data there are just three years to validate on, and the 2025 test year was viewed several times during development.
 
 ## Data sources
 

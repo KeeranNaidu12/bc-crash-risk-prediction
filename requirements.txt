@@ -8,7 +8,6 @@ psycopg2-binary
 sqlalchemy
 python-dotenv
 scikit-learn
-lightgbm
-shap
+statsmodels
 matplotlib
 jupyter
